@@ -13,7 +13,7 @@ import com.artillexstudios.axminions.api.minions.miniontype.MinionTypes
 import com.artillexstudios.axminions.api.utils.CoolDown
 import com.artillexstudios.axminions.api.utils.Keys
 import com.artillexstudios.axminions.api.utils.fastFor
-import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver
+import net.Indyuce.mmoitems.MMOItems
 import java.util.Locale
 import net.md_5.bungee.api.ChatMessageType
 import net.md_5.bungee.api.chat.TextComponent
@@ -163,6 +163,36 @@ class MinionInventoryListener : Listener {
                     }
 
                     it.takeBalance(player, money)
+                }
+
+                if (AxMinionsPlugin.integrations.mmoitemsIntegration) {
+                    val mmoItemsSection = minion.getType().getSection("requirements.mmoitems", minion.getLevel() + 1)
+                    if (mmoItemsSection != null) {
+                        for (key in mmoItemsSection.keys) {
+                            val section = mmoItemsSection.getSection(key.toString()) ?: continue
+                            val requiredType = section.getString("type") ?: continue
+                            val requiredId = section.getString("id") ?: continue
+                            val amount = section.getInt("amount", 1)
+                            var found = 0
+
+                            for (item in player.inventory.contents) {
+                                if (item == null || item.type.isAir) continue
+                                val itemType = MMOItems.getType(item)
+                                val itemId = MMOItems.getID(item)
+                                if (itemType != null && itemId != null && itemType.id == requiredType && itemId == requiredId) {
+                                    val toRemove = minOf(amount - found, item.amount)
+                                    item.amount -= toRemove
+                                    found += toRemove
+                                    if (found >= amount) break
+                                }
+                            }
+
+                            if (found < amount) {
+                                sendFail(player)
+                                return
+                            }
+                        }
+                    }
                 }
 
                 if (Config.UPGRADE_SOUND().isNotBlank()) {

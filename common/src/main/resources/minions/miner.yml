@@ -12,18 +12,25 @@ tool:
     - "DIAMOND_PICKAXE"
     - "NETHERITE_PICKAXE"
 
-# Can be: sphere, line, face, asphere
+# Can be: sphere, line, face, asphere, void
 # If set to sphere: checks blocks in a sphere with the range of the minion as radius (Most resource intensive, the larger the radius, the worse)
 # If set to line: checks blocks in all 4 directions from the minion in the range of the minion (Best performance to blocks broken ratio)
 # If set to face: checks blocks only in the facing of the minion (Least resource intensive)
 # If set to asphere: checks blocks in a sphere with the range of the minion as the radius, around the minion
 # Only switch to asphere mode, if you know what you're doing,
 # as it may cause some issues due to states being concurrently modified!
+# If set to void: generates items directly without needing blocks to break (uses void-drops config below)
+#   - Still requires a pickaxe tool
+#   - Still uses speed, efficiency enchantment, and range
+#   - Still damages tool durability normally
+#   - Still counts actions / upgrades work the same
+#   - Only difference: items are generated directly instead of needing surrounding blocks
 mode: line
 
 # Can be generator or whitelist
 # with generator mode the minion only mines blocks that are from a stone generator (water & lava on the sides of the block)
 # with whitelist mode, it will break all blocks that match the whitelist
+# Note: break/whitelist settings are ignored in void mode
 break: generator
 
 whitelist:
@@ -32,6 +39,18 @@ whitelist:
   - "iron_ore"
   - "gold_ore"
   - "redstone_ore"
+
+# Void mode drops - only used when mode: void
+# Each tick, the minion randomly rolls one of these items
+# Format: "MATERIAL_NAME" or "MMO_TYPE:MMO_ID": weight (chance)
+# - Vanilla: just the material name (e.g. IRON_ORE, COBBLESTONE)
+# - MMOItems: "TYPE:ID" (e.g. GEM_STONE:PERFECT_RUBY)
+# - Weight: the chance weight. If total exceeds 100, auto-normalizes down to ~100%
+#   Example: 50+50=100, 50+30+30=110 -> auto scales to ~45+27+27=100
+# void-drops:
+#   IRON_ORE: 50
+#   COBBLESTONE: 50
+#   GEM_STONE:PERFECT_RUBY: 1
 
 item:
   type: "player_head"
@@ -144,6 +163,15 @@ upgrades:
     requirements:
       money: 5000000
       actions: 50000
+#      mmoitems:
+#        material_1:
+#          type: "GEM_STONE"
+#          id: "PERFECT_RUBY"
+#          amount: 5
+#        material_2:
+#          type: "ARMOR"
+#          id: "WITHER_CHESTPLATE"
+#          amount: 1
     items:
       chestplate:
         type: LEATHER_CHESTPLATE
