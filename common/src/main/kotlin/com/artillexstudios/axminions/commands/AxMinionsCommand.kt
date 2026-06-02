@@ -12,6 +12,7 @@ import com.artillexstudios.axminions.api.minions.miniontype.MinionType
 import com.artillexstudios.axminions.api.minions.miniontype.MinionTypes
 import com.artillexstudios.axminions.api.utils.fastFor
 import com.artillexstudios.axminions.converter.LitMinionsConverter
+import com.artillexstudios.axminions.gui.GuiManager
 import com.artillexstudios.axminions.integrations.island.SuperiorSkyBlock2Integration
 import com.artillexstudios.axminions.minions.Minions
 import com.bgsoftware.superiorskyblock.api.SuperiorSkyblockAPI
@@ -30,7 +31,7 @@ class AxMinionsCommand {
 
     @Subcommand("give")
     @CommandPermission("axminions.command.give")
-    @Description("Give a minion to a player")
+    @Description("Give a minion to a player (usage: give <player> <type> [level] [amount])")
     @AutoComplete("* @minionTypes * *")
     fun give(
         sender: CommandSender,
@@ -40,6 +41,22 @@ class AxMinionsCommand {
         @Default("1") @Range(min = 1.0, max = 64.0) amount: Int
     ) {
         val item = minionType.getItem(level)
+        item.amount = amount
+
+        receiver.inventory.addItem(item)
+    }
+
+    @Subcommand("giveonly")
+    @CommandPermission("axminions.command.give")
+    @Description("Give a minion to a player (usage: giveonly <player> <type> <amount>)")
+    @AutoComplete("* @minionTypes *")
+    fun give(
+        sender: CommandSender,
+        receiver: Player,
+        minionType: MinionType,
+        @Range(min = 1.0, max = 64.0) amount: Int
+    ) {
+        val item = minionType.getItem(1)
         item.amount = amount
 
         receiver.inventory.addItem(item)
@@ -70,8 +87,11 @@ class AxMinionsCommand {
         AxMinionsPlugin.config.reload()
         AxMinionsPlugin.messages.reload()
 
+        GuiManager.reloadAll()
+
         MinionTypes.getMinionTypes().fastFor { _, v ->
             v.getConfig().reload()
+            v.validateMMOItemsRequirements(AxMinionsPlugin.INSTANCE.logger)
         }
 
         AxMinionsAPI.INSTANCE.getMinions().fastFor {

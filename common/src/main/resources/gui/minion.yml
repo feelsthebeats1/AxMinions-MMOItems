@@ -1,0 +1,92 @@
+# ========================================
+# Default Minion GUI Layout
+# This is the GUI that opens when you right-click a minion
+# ========================================
+title: "<level_color>[<level>] <name>"
+size: 27
+purpose: minion
+
+items:
+  # Decorative border - top row (slots 0-8)
+  border_top:
+    slot: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+    type: black_stained_glass_pane
+    name: " "
+
+  # Decorative border - bottom row (slots 18-26)
+  border_bottom:
+    slot: [18, 19, 20, 21, 22, 23, 24, 25, 26]
+    type: black_stained_glass_pane
+    name: " "
+
+  # Rotate button
+  rotate:
+    slot: 10
+    type: ender_eye
+    name: "<#33FF33><b>Rotate"
+    lore:
+      - ""
+      - " <gray>- <white>Current: <#33FF33><direction>"
+      - ""
+      - "<#33FF33><b>(!)</b> Click here to rotate your minion!"
+    action: "rotate"
+
+  # Link to container button
+  link:
+    slot: 11
+    type: chest
+    name: "<#FFCC00><b>Link to container"
+    lore:
+      - ""
+      - " <gray>- <white>Status: <#FFCC00><linked>"
+      - ""
+      - "<#FFCC00><b>(!)</b> Click here to link your minion to a container!"
+    action: "link"
+
+  # Tool display slot
+  item:
+    slot: 13
+    type: air
+    name: ""
+    action: "none"
+
+  # Charge button
+  charge:
+    slot: 9
+    type: lava_bucket
+    name: "<#FB8E08><b>Charge"
+    lore:
+      - ""
+      - " <gray>- <white>Current charge: <#FFCC00><charge>"
+      - ""
+      - "<#FB8E08><b>(!)</b> Click here to charge your minion!"
+    action: "charge"
+
+  # Upgrade button - opens the upgrade GUI
+  upgrade:
+    slot: 15
+    type: gold_ingot
+    name: "<#00CCFF><b>Upgrade minion"
+    lore:
+      - ""
+      - " <gray>- <white>Level: <green><level> » <dark_green><next_level>"
+      - " <gray>- <white>Range: <green><range> » <dark_green><next_range>"
+      - " <gray>- <white>Speed: <green><speed> » <dark_green><next_speed>"
+      - ""
+      - "<#00CCFF><b>(!)</b> Click here to upgrade your minion!"
+    action: "open_gui"
+    gui: "upgrade"
+
+  # Statistics button
+  statistics:
+    slot: 16
+    type: paper
+    name: "<#00AAFF><b>Statistics"
+    lore:
+      - ""
+      - " <gray>- <white>Blocks broken: <#00AAFF><actions>"
+      - ""
+      - "<#00AAFF><b>(!)</b> Click to collect stored XP!"
+    action: "statistics"
+
+config-version: 1

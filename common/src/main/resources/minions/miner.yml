@@ -40,17 +40,14 @@ whitelist:
   - "gold_ore"
   - "redstone_ore"
 
-# Void mode drops - only used when mode: void
-# Each tick, the minion randomly rolls one of these items
-# Format: "MATERIAL_NAME" or "MMO_TYPE:MMO_ID": weight (chance)
-# - Vanilla: just the material name (e.g. IRON_ORE, COBBLESTONE)
-# - MMOItems: "TYPE:ID" (e.g. GEM_STONE:PERFECT_RUBY)
-# - Weight: the chance weight. If total exceeds 100, auto-normalizes down to ~100%
-#   Example: 50+50=100, 50+30+30=110 -> auto scales to ~45+27+27=100
+# Void mode drops - only used when mode: void (configure inside each upgrade level)
+# Each tick, the minion independently rolls each material based on its drop chance.
+# Drop chance is calculated as: weight / totalWeight (e.g., weight=60, totalWeight=100 => 60%)
+# Format:
 # void-drops:
-#   IRON_ORE: 50
-#   COBBLESTONE: 50
-#   GEM_STONE:PERFECT_RUBY: 1
+#   - MATERIAL_NAME: weight        (e.g. COBBLESTONE: 60)
+#   - MMO_TYPE:MMO_ID: weight      (e.g. GEM_STONE:PERFECT_RUBY: 1)
+# The Fortune enchantment on the tool increases the amount of each dropped item.
 
 item:
   type: "player_head"
@@ -65,6 +62,13 @@ item:
     - " <#00AAFF>❙ <white>Blocks broken: <#FFEEAA><actions>"
     - ""
     - "<#00AAFF><b>(!)</b> Place the minion and give it a pickaxe!"
+    -
+  # mmoitem_1_name, _amount, _current
+
+# External GUI file references (loaded from gui/ folder)
+gui-configs:
+  minion: minion.yml
+  upgrade: mmoitems-upgrade.yml
 
 gui:
   upgrade:
@@ -79,6 +83,11 @@ gui:
       - "<#00CCFF>Requirements:"
       - " <gray>- <white>Money: <#33FF33><price>$"
       - " <gray>- <white>Blocks broken: <#33FF33><required_actions>"
+      -
+      - "<#00CCFF>Requirements:"
+      - " <gray>- <white> <mmoitem_1_name> x<mmoitem_1_amount>"
+      - " <gray>You have: <color:#FFEEAA><mmoitem_1_current><gray>/<mmoitem_1_amount>"
+
       - ""
       - "<#00CCFF><b>(!)</b> Click here to upgrade your minion!"
   statistics:
@@ -93,6 +102,10 @@ upgrades:
   1:
     range: 3
     speed: 200
+    # Uncomment to enable void mode drops for level 1:
+#    void-drops:
+#      - COBBLESTONE: 50
+#      - IRON_ORE: 50
     items:
       helmet:
         type: "player_head"
@@ -122,7 +135,7 @@ upgrades:
       money: 3000
       actions: 300
   4:
-    range: 4
+    range: 3
     speed: 160
     requirements:
       money: 10000

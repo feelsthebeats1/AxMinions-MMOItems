@@ -117,4 +117,8 @@ interface Minion : InventoryHolder {
     fun getCharge(): Long
 
     fun setCharge(charge: Long)
+
+    fun openGui(player: Player, purpose: String)
+
+    fun getCurrentGuiPurpose(): String?
 }

@@ -39,6 +39,8 @@ import com.artillexstudios.axminions.minions.miniontype.CrafterMinionType
 import org.bstats.bukkit.Metrics
 import org.bukkit.Bukkit
 import revxrsal.commands.bukkit.BukkitCommandHandler
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class AxMinionsPlugin : AxPlugin() {
     companion object {
@@ -48,6 +50,7 @@ class AxMinionsPlugin : AxPlugin() {
         lateinit var dataHandler: DataHandler
         lateinit var dataQueue: ThreadedQueue<Runnable>
         lateinit var integrations: Integrations
+        private var autosaveTaskId: Int = -1
     }
 
     override fun dependencies(manager: DependencyManagerWrapper) {
@@ -89,6 +92,13 @@ class AxMinionsPlugin : AxPlugin() {
             it.register(SellerMinionType())
             it.register(FisherMinionType())
             it.register(SlayerMinionType())
+        }
+
+        // Validate MMOItems requirements in config on startup
+        if (AxMinionsPlugin.integrations.mmoitemsIntegration) {
+            MinionTypes.getMinionTypes().fastFor { _, v ->
+                v.validateMMOItemsRequirements(logger)
+            }
         }
 
         val handler = BukkitCommandHandler.create(this)
@@ -164,7 +174,20 @@ class AxMinionsPlugin : AxPlugin() {
             }
         }
 
+        flushDataQueue()
+        dataQueue.stop()
         dataHandler.disable()
+    }
+
+    private fun flushDataQueue() {
+        val latch = CountDownLatch(1)
+        dataQueue.submit {
+            latch.countDown()
+        }
+
+        if (!latch.await(30, TimeUnit.SECONDS)) {
+            logger.warning("[AxMinions] Database queue did not flush within 30 seconds during shutdown.")
+        }
     }
 
     private fun loadDataHandler() {

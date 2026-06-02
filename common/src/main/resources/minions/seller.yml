@@ -24,6 +24,11 @@ item:
     - ""
     - "<#CC00FF><b>(!)</b> Place the minion and give it a bow!"
 
+# External GUI file references (loaded from gui/ folder)
+gui-configs:
+  minion: minion.yml
+  upgrade: default-upgrade.yml
+
 gui:
   upgrade:
     type: "gold_ingot"

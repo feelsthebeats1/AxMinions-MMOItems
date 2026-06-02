@@ -52,57 +52,90 @@ class MinerMinionType : MinionType("miner", AxMinionsPlugin.INSTANCE.getResource
     private fun loadVoidDrops(minion: Minion) {
         voidDrops = mutableListOf()
         voidTotalWeight = 0
-        val dropSection = getSection("void-drops", minion.getLevel()) ?: return
+
+        // Get the level-specific config section to read string list
+        val levelConfig = getConfig().backingDocument.getSection("upgrades.${minion.getLevel()}")
+        val dropEntries = levelConfig?.getStringList("void-drops") ?: emptyList()
+
+        if (dropEntries.isEmpty()) {
+            voidDrops = emptyList()
+            voidTotalWeight = 0
+            return
+        }
 
         val parsed = mutableListOf<VoidDrop>()
 
-        for (key in dropSection.keys) {
-            val weight = dropSection.getInt(key.toString(), 100)
-            if (weight <= 0) continue
+        for (entry in dropEntries) {
+            val entryStr = entry.trim()
 
-            // Check if key contains ':' -> MMOItems format: TYPE:ID
-            val keyStr = key?.toString() ?: continue
+            val lastColon = entryStr.lastIndexOf(':')
+            if (lastColon == -1) {
+                continue
+            }
+
+            val keyStr = entryStr.substring(0, lastColon).trim().uppercase(Locale.ENGLISH)
+            val weight = entryStr.substring(lastColon + 1).trim().toIntOrNull()
+            if (weight == null || weight <= 0) {
+                continue
+            }
+
+            // Check if key contains ':' (MMOItems type:id). But already split at the LAST ':',
+            // so if there's still a ':' in keyStr, it's MMOItems format.
             if (keyStr.contains(":") && AxMinionsPlugin.integrations.mmoitemsIntegration) {
                 val idx = keyStr.indexOf(":")
-                val mmoTypeName = keyStr.substring(0, idx)
-                val mmoId = keyStr.substring(idx + 1)
+                val mmoTypeName = keyStr.substring(0, idx).uppercase(Locale.ENGLISH)
+                val mmoId = keyStr.substring(idx + 1).uppercase(Locale.ENGLISH)
 
-                // MMOItems.getItem(type: String?, id: String?) returns ItemStack?
                 val mmoItemStack = MMOItems.plugin.getItem(mmoTypeName, mmoId)
                 if (mmoItemStack != null) {
-                    parsed.add(VoidDrop(mmoItemStack, weight))
+                    parsed.add(VoidDrop(mmoItemStack.clone(), weight))
                     continue
+                } else {
+                    AxMinionsPlugin.INSTANCE.logger.warning("[MinerMinionType] Void-drops: MMOItems item '$mmoTypeName:$mmoId' not found! Check your config.")
                 }
             }
 
             // Vanilla material
-            val material = Material.matchMaterial(keyStr.uppercase(Locale.ENGLISH))
+            val material = Material.matchMaterial(keyStr)
             if (material != null) {
                 parsed.add(VoidDrop(ItemStack(material, 1), weight))
             }
         }
 
-        // Normalize weights if total > 100
         val totalWeight = parsed.sumOf { it.weight }
-        if (totalWeight > 100) {
-            val scale = 100.0 / totalWeight
-            voidDrops = parsed.map { it.copy(weight = (it.weight * scale).toInt().coerceAtLeast(1)) }
-        } else {
-            voidDrops = parsed
+        if (totalWeight == 0) {
+            voidDrops = emptyList()
+            voidTotalWeight = 0
+            return
         }
-        voidTotalWeight = voidDrops.sumOf { it.weight }
-        if (voidTotalWeight == 0) voidDrops = emptyList()
+
+        voidTotalWeight = totalWeight
+        voidDrops = parsed
     }
 
-    private fun rollVoidDrop(): ItemStack? {
-        if (voidDrops.isEmpty()) return null
-        val roll = Random().nextInt(voidTotalWeight)
-        var cumulative = 0
+    private fun rollVoidDrop(minion: Minion): List<ItemStack> {
+        if (voidDrops.isEmpty()) return emptyList()
+
+        val random = Random()
+        val fortuneLevel = Enchantments.FORTUNE?.let { minion.getTool()?.getEnchantmentLevel(it) } ?: 0
+        val drops = mutableListOf<ItemStack>()
+
         for (drop in voidDrops) {
-            cumulative += drop.weight
-            if (roll < cumulative) return drop.item.clone()
+            val roll = random.nextInt(voidTotalWeight)
+            if (roll < drop.weight) {
+                val item = drop.item.clone()
+                // Apply Fortune to increase amount
+                val bonus = if (fortuneLevel > 0) {
+                    random.nextInt(fortuneLevel + 1) + random.nextInt(fortuneLevel + 1)
+                } else {
+                    0
+                }
+                item.amount = 1 + bonus
+                drops.add(item)
+            }
         }
-        return voidDrops.last().item.clone()
+
+        return drops
     }
 
     override fun shouldRun(minion: Minion): Boolean {
@@ -166,11 +199,17 @@ class MinerMinionType : MinionType("miner", AxMinionsPlugin.INSTANCE.getResource
 
         // Void mode: generate items directly instead of breaking blocks
         if (mode == "void") {
-            val drop = rollVoidDrop()
-            if (drop != null) {
-                minion.addToContainerOrDrop(drop)
-                minion.setActions(minion.getActionAmount() + drop.amount)
-                for (i in 0 until drop.amount) {
+            loadVoidDrops(minion)
+            val drops = rollVoidDrop(minion)
+            if (drops.isNotEmpty()) {
+                val totalAmount = drops.sumOf { it.amount }
+                drops.forEach { drop ->
+                    minion.addToContainerOrDrop(drop)
+                }
+
+                minion.setActions(minion.getActionAmount() + totalAmount)
+
+                for (i in 0 until totalAmount) {
                     minion.damageTool()
                 }
             }
@@ -179,7 +218,7 @@ class MinerMinionType : MinionType("miner", AxMinionsPlugin.INSTANCE.getResource
 
         var amount = 0
         var xp = 0
-        when (getConfig().getString("mode").lowercase(Locale.ENGLISH)) {
+        when (mode) {
             "sphere" -> {
                 LocationUtils.getAllBlocksInRadius(minion.getLocation(), minion.getRange(), false).fastFor { location ->
                     if (AxMinionsPlugin.integrations.kGeneratorsIntegration) {
@@ -435,6 +474,7 @@ class MinerMinionType : MinionType("miner", AxMinionsPlugin.INSTANCE.getResource
                         }
                     }
             }
+
         }
 
         val coerced =

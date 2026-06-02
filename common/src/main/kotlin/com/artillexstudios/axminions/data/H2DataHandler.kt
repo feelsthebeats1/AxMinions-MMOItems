@@ -6,6 +6,7 @@ import com.artillexstudios.axminions.api.config.Config
 import com.artillexstudios.axminions.api.data.DataHandler
 import com.artillexstudios.axminions.api.minions.Direction
 import com.artillexstudios.axminions.api.minions.miniontype.MinionType
+import com.artillexstudios.axminions.minions.Minions
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.bukkit.Bukkit
@@ -81,6 +82,10 @@ class H2DataHandler : DataHandler {
             }
         }
 
+        createUniqueIndex("axminions_worlds_name_uidx", "axminions_worlds", "`name`")
+        createUniqueIndex("axminions_locations_coords_uidx", "axminions_locations", "`x`, `y`, `z`, `world_id`")
+        createUniqueIndex("axminions_minions_location_uidx", "axminions_minions", "`location_id`")
+
         if (Config.ISLAND_LIMIT() > 0) {
             dataSource.connection.use { connection ->
                 connection.prepareStatement("CREATE TABLE IF NOT EXISTS `axminions_island_counter`(`island` VARCHAR(256) PRIMARY KEY, `placed` INT);")
@@ -135,13 +140,23 @@ class H2DataHandler : DataHandler {
                             chestLocation = getLocation(chestLocationId)
                         }
 
+                        if (location == null || location.world == null) {
+                            AxMinionsPlugin.INSTANCE.logger.warning("[Database] Skipping minion with invalid location id $locationId.")
+                            continue
+                        }
+
+                        if (isLoaded(location)) {
+                            AxMinionsPlugin.INSTANCE.logger.warning("[Database] Skipping duplicate loaded minion at ${location.world?.name}:${location.blockX},${location.blockY},${location.blockZ}.")
+                            continue
+                        }
+
                         var itemStack = ItemStack(Material.AIR)
                         if (tool != null) {
                             itemStack = Serializers.ITEM_STACK.deserialize(tool)
                         }
 
                         com.artillexstudios.axminions.minions.Minion(
-                            location!!,
+                            location,
                             ownerId,
                             Bukkit.getOfflinePlayer(ownerId),
                             minionType,
@@ -237,6 +252,8 @@ class H2DataHandler : DataHandler {
     }
 
     override fun saveMinion(minion: com.artillexstudios.axminions.api.minions.Minion) {
+        if ((minion as? com.artillexstudios.axminions.minions.Minion)?.isRemoved() == true) return
+
         val locationId = getLocationID(minion.getLocation())
         var linkedChestId: Int? = null
         var userId: UUID? = null
@@ -330,6 +347,7 @@ class H2DataHandler : DataHandler {
             }
         }
 
+        // Fix: use getChestLocationId() instead of getLocationId() for chest location cleanup
         if (minion.getChestLocationId() != 0) {
             dataSource.connection.use { connection ->
                 connection.prepareStatement("SELECT * FROM `axminions_minions` WHERE `chest_location_id` = ?;")
@@ -338,7 +356,7 @@ class H2DataHandler : DataHandler {
                         statement.executeQuery().use { resultSet ->
                             if (!resultSet.next()) {
                                 connection.prepareStatement("DELETE FROM `axminions_locations` WHERE `id` = ?").use {
-                                    it.setInt(1, minion.getLocationId())
+                                    it.setInt(1, minion.getChestLocationId())
                                     it.executeUpdate()
                                 }
                             }
@@ -468,6 +486,33 @@ class H2DataHandler : DataHandler {
     }
 
     override fun disable() {
-        dataSource.connection.prepareStatement("SHUTDOWN DEFRAG;").executeUpdate()
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("SHUTDOWN DEFRAG;").use {
+                it.executeUpdate()
+            }
+        }
+        dataSource.close()
+    }
+
+    private fun createUniqueIndex(name: String, table: String, columns: String) {
+        try {
+            dataSource.connection.use { connection ->
+                connection.prepareStatement("CREATE UNIQUE INDEX IF NOT EXISTS `$name` ON `$table` ($columns);").use {
+                    it.executeUpdate()
+                }
+            }
+        } catch (exception: Exception) {
+            AxMinionsPlugin.INSTANCE.logger.warning("[Database] Could not create unique index $name. Existing duplicate rows may need cleanup: ${exception.message}")
+        }
+    }
+
+    private fun isLoaded(location: Location): Boolean {
+        return Minions.getMinions().any {
+            val other = it.getLocation()
+            other.world?.uid == location.world?.uid &&
+                other.blockX == location.blockX &&
+                other.blockY == location.blockY &&
+                other.blockZ == location.blockZ
+        }
     }
 }

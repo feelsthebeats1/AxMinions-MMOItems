@@ -15,6 +15,7 @@ import com.artillexstudios.axminions.api.utils.fastFor
 import java.io.File
 import java.io.InputStream
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder
+import org.bukkit.Bukkit
 import org.bukkit.Material
 import org.bukkit.block.Block
 import org.bukkit.block.BlockFace
@@ -60,6 +61,31 @@ abstract class MinionType(private val name: String, private val defaults: InputS
 
     open fun shouldRun(minion: Minion): Boolean {
         return true
+    }
+
+    /**
+     * Get the GUI config file name for a specific purpose (e.g. "minion", "upgrade").
+     * Reads from the minion config file under the "gui-configs" section.
+     * Example config:
+     *   gui-configs:
+     *     minion: minion.yml
+     *     upgrade: miner-upgrade.yml
+     *
+     * Falls back to "minion" for the main GUI, or "<minion_name>-<purpose>" for other purposes.
+     */
+    fun getGuiForPurpose(purpose: String): String {
+        val guiConfigsSection = config.getSection("gui-configs")
+        if (guiConfigsSection != null) {
+            val guiName = guiConfigsSection.getString(purpose)
+            if (guiName != null) {
+                return guiName
+            }
+        }
+        // Fallback: return a default name for the main GUI or use pattern "<minion_name>-<purpose>"
+        return when (purpose) {
+            "minion" -> "minion"
+            else -> "${name}-$purpose"
+        }
     }
 
     fun tick(minion: Minion) {
@@ -124,6 +150,37 @@ abstract class MinionType(private val name: String, private val defaults: InputS
 
     fun hasReachedMaxLevel(minion: Minion): Boolean {
         return !config.backingDocument.isSection("upgrades.${minion.getLevel() + 1}")
+    }
+
+    fun validateMMOItemsRequirements(logger: java.util.logging.Logger) {
+        val upgradesSection = config.getSection("upgrades") ?: return
+        val mmoItemsIntegration = try {
+            Bukkit.getPluginManager().getPlugin("MMOItems") != null
+        } catch (_: Exception) {
+            false
+        }
+        if (!mmoItemsIntegration) return
+
+        for (levelKey in upgradesSection.getRoutesAsStrings(false)) {
+            val reqSection = config.backingDocument.getSection("upgrades.$levelKey.requirements.mmoitems") ?: continue
+            for (key in reqSection.keys) {
+                val itemSection = reqSection.getSection(key.toString()) ?: continue
+                val type = itemSection.getString("type") ?: continue
+                val id = itemSection.getString("id") ?: continue
+                try {
+                    val clazz = Class.forName("net.Indyuce.mmoitems.MMOItems")
+                    val pluginField = clazz.getField("plugin")
+                    val plugin = pluginField.get(null)
+                    val getItemMethod = clazz.getMethod("getItem", String::class.java, String::class.java)
+                    val item = getItemMethod.invoke(plugin, type, id)
+                    if (item == null) {
+                        logger.warning("[${getName().uppercase()}] Upgrade level $levelKey: MMOItems item '$type:$id' not found! Check your config.")
+                    }
+                } catch (_: Exception) {
+                    logger.warning("[${getName().uppercase()}] Could not validate MMOItems item '$type:$id' (MMOItems may not be loaded yet).")
+                }
+            }
+        }
     }
 
     fun hasChestOnSide(block: Block): Boolean {

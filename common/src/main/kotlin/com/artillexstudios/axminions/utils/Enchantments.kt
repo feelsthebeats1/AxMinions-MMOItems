@@ -6,5 +6,5 @@ import org.bukkit.enchantments.Enchantment
 object Enchantments {
     val EFFICIENCY: Enchantment? = Enchantment.getByKey(NamespacedKey.minecraft("efficiency"))
     val UNBREAKING: Enchantment? = Enchantment.getByKey(NamespacedKey.minecraft("unbreaking"))
+    val FORTUNE: Enchantment? = Enchantment.getByKey(NamespacedKey.minecraft("fortune"))
 }
-

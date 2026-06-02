@@ -21,6 +21,11 @@ item:
     - ""
     - "<#00EEFF><b>(!)</b> Place the minion and give it a fishing rod!"
 
+# External GUI file references (loaded from gui/ folder)
+gui-configs:
+  minion: minion.yml
+  upgrade: default-upgrade.yml
+
 gui:
   upgrade:
     type: "gold_ingot"

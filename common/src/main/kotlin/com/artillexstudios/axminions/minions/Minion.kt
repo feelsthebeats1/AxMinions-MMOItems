@@ -2,16 +2,13 @@ package com.artillexstudios.axminions.minions
 
 import com.artillexstudios.axapi.events.PacketEntityInteractEvent
 import com.artillexstudios.axapi.hologram.Hologram
-import com.artillexstudios.axapi.hologram.HologramType
 import com.artillexstudios.axapi.hologram.HologramTypes
-import com.artillexstudios.axapi.hologram.page.HologramPage
-import com.artillexstudios.axapi.hologram.page.TextDisplayHologramPage
-import com.artillexstudios.axapi.packetentity.meta.entity.DisplayMeta
-import com.artillexstudios.axapi.packetentity.meta.entity.TextDisplayMeta
 import com.artillexstudios.axapi.items.WrappedItemStack
 import com.artillexstudios.axapi.nms.NMSHandlers
 import com.artillexstudios.axapi.packetentity.PacketEntity
 import com.artillexstudios.axapi.packetentity.meta.entity.ArmorStandMeta
+import com.artillexstudios.axapi.packetentity.meta.entity.DisplayMeta
+import com.artillexstudios.axapi.packetentity.meta.entity.TextDisplayMeta
 import com.artillexstudios.axapi.packetentity.meta.serializer.Accessors
 import com.artillexstudios.axapi.scheduler.Scheduler
 import com.artillexstudios.axapi.utils.EquipmentSlot
@@ -31,9 +28,15 @@ import com.artillexstudios.axminions.api.utils.TimeUtils
 import com.artillexstudios.axminions.api.utils.fastFor
 import com.artillexstudios.axminions.api.warnings.Warning
 import com.artillexstudios.axminions.api.warnings.Warnings
+import com.artillexstudios.axminions.gui.GuiConfig
+import com.artillexstudios.axminions.gui.GuiManager
 import com.artillexstudios.axminions.listeners.LinkingListener
 import com.artillexstudios.axminions.utils.Enchantments
+import net.Indyuce.mmoitems.MMOItems
+import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.minimessage.MiniMessage
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 import org.bukkit.Bukkit
 import org.bukkit.Location
 import org.bukkit.Material
@@ -101,11 +104,13 @@ class Minion(
     private var linkedInventory: Inventory? = null
     internal val openInventories = mutableListOf<Inventory>()
     private var toolMeta: ItemMeta? = null
+    private var currentGuiPurpose: String? = null
 
     @Volatile
     private var ticking = false
     private var debugHologram: Hologram? = null
     val broken = AtomicBoolean(false)
+    private val removed = AtomicBoolean(false)
     private var ownerOnline = false
     private var unbreakable = false
 
@@ -181,13 +186,13 @@ class Minion(
             debugHologram = Hologram(location.clone().add(0.0, 2.0, 0.0))
             val page = debugHologram?.createPage(HologramTypes.TEXT)
             page?.setEntityMetaHandler({ meta ->
-                val textDisplayMeta = meta as TextDisplayMeta;
-                textDisplayMeta.seeThrough(true);
-                textDisplayMeta.alignment(TextDisplayMeta.Alignment.CENTER);
-                textDisplayMeta.billboardConstrain(DisplayMeta.BillboardConstrain.CENTER);
+                val textDisplayMeta = meta as TextDisplayMeta
+                textDisplayMeta.seeThrough(true)
+                textDisplayMeta.alignment(TextDisplayMeta.Alignment.CENTER)
+                textDisplayMeta.billboardConstrain(DisplayMeta.BillboardConstrain.CENTER)
             })
-            page?.setContent(StringUtils.formatToString("ticking: $ticking"));
-            page?.spawn();
+            page?.setContent(StringUtils.formatToString("ticking: $ticking"))
+            page?.spawn()
         }
 
         meta.metadata().set(Accessors.POSE, Pose.STANDING)
@@ -202,7 +207,12 @@ class Minion(
         if (preBreakEvent.isCancelled) return
 
         LinkingListener.linking.remove(event.player)
-        remove()
+
+        // Delete from DB FIRST, before giving items to player, to prevent dupe on crash
+        if (!removed.get()) {
+            AxMinionsPlugin.dataHandler.deleteMinion(this)
+        }
+
         setTicking(false)
         openInventories.fastFor { it.viewers.fastFor { viewer -> viewer.closeInventory() } }
         val tool = getTool()
@@ -335,6 +345,60 @@ class Minion(
                             this.level + 1
                         ).toString()
                     )
+
+                // MMOItems upgrade requirement placeholders
+                val mmoItemPlaceholders = mutableListOf<net.kyori.adventure.text.minimessage.tag.resolver.TagResolver>()
+
+                if (AxMinionsPlugin.integrations.mmoitemsIntegration && !type.hasReachedMaxLevel(this)) {
+                    val mmoItemsSection = type.getSection("requirements.mmoitems", this.level + 1)
+                    if (mmoItemsSection != null) {
+                        var mmoIndex = 1
+                        for (key in mmoItemsSection.keys) {
+                            val section = mmoItemsSection.getSection(key.toString()) ?: continue
+                            val requiredType = section.getString("type") ?: continue
+                            val requiredId = section.getString("id") ?: continue
+                            val requiredAmount = section.getInt("amount", 1)
+
+                            // Get MMOItem display name
+                            val mmoItem = MMOItems.plugin.getItem(requiredType, requiredId)
+
+                            val displayName = mmoItem?.itemMeta?.displayName
+                                ?: "$requiredType:$requiredId"
+
+                            // Deserialize Legacy Component
+                            val displayNameComponent: Component =
+                                LegacyComponentSerializer.legacySection().deserialize(displayName)
+                            // Serialize Component to MiniMessage format
+                            val miniMessageDisplayName: String = MiniMessage.miniMessage().serialize(displayNameComponent)
+
+                            // Count current amount from player inventory
+                            var currentAmount = 0
+                            val viewer = inventory.viewers.firstOrNull() as? org.bukkit.entity.Player
+                            if (viewer != null) {
+                                for (invItem in viewer.inventory.contents) {
+                                    if (invItem == null || invItem.type.isAir) continue
+                                    val itemType = MMOItems.getType(invItem)
+                                    val itemId = MMOItems.getID(invItem)
+                                    if (itemType != null && itemId != null && itemType.id == requiredType && itemId == requiredId) {
+                                        currentAmount += invItem.amount
+                                    }
+                                }
+                            }
+
+                            mmoItemPlaceholders.add(
+                                Placeholder.parsed("mmoitem_${mmoIndex}_name", miniMessageDisplayName)
+                            )
+                            mmoItemPlaceholders.add(
+                                Placeholder.unparsed("mmoitem_${mmoIndex}_amount", requiredAmount.toString())
+                            )
+                            mmoItemPlaceholders.add(
+                                Placeholder.unparsed("mmoitem_${mmoIndex}_current", currentAmount.toString())
+                            )
+                            mmoIndex++
+                        }
+                    }
+                }
+
                 val stored = Placeholder.parsed("storage", numberFormat.format(storage))
                 val actions = Placeholder.parsed("actions", actions.toString())
                 val multiplier = Placeholder.parsed("multiplier", type.getDouble("multiplier", this.level).toString())
@@ -366,11 +430,13 @@ class Minion(
                     chanceKillStackedAmount,
                     nextChanceKillStackedAmount,
                     stackedAmount,
-                    nextStackedAmount
+                    nextStackedAmount,
+                    *mmoItemPlaceholders.toTypedArray()
                 ).get()
 
                 val meta = item.itemMeta!!
-                meta.persistentDataContainer.set(Keys.GUI, PersistentDataType.STRING, it)
+                val actionKey = if (it.equals("upgrade", true)) "open_gui_upgrade" else it
+                meta.persistentDataContainer.set(Keys.GUI, PersistentDataType.STRING, actionKey)
                 item.itemMeta = meta
             } else if (it.equals("item")) {
                 item = tool?.clone() ?: ItemStack(Material.AIR)
@@ -479,6 +545,7 @@ class Minion(
     }
 
     override fun setTool(tool: ItemStack, save: Boolean) {
+        if (removed.get()) return
         this.tool = tool.clone()
         toolMeta = if (!tool.type.isAir) {
             tool.itemMeta
@@ -497,9 +564,7 @@ class Minion(
         }
 
         if (save) {
-            AxMinionsPlugin.dataQueue.submit {
-                AxMinionsPlugin.dataHandler.saveMinion(this)
-            }
+            queueSave()
         }
     }
 
@@ -512,6 +577,7 @@ class Minion(
     }
 
     override fun setLevel(level: Int) {
+        if (removed.get()) return
         this.level = level
         updateArmour()
         updateInventories()
@@ -526,9 +592,7 @@ class Minion(
             )
         )
 
-        AxMinionsPlugin.dataQueue.submit {
-            AxMinionsPlugin.dataHandler.saveMinion(this)
-        }
+        queueSave()
     }
 
     override fun getData(key: String): String? {
@@ -568,6 +632,7 @@ class Minion(
     }
 
     override fun setLinkedChest(location: Location?) {
+        if (removed.get()) return
         this.linkedChest = location?.clone()
         if (linkedChest != null) {
             Scheduler.get().executeAt(linkedChest) {
@@ -579,9 +644,7 @@ class Minion(
             linkedInventory = null
         }
 
-        AxMinionsPlugin.dataQueue.submit {
-            AxMinionsPlugin.dataHandler.saveMinion(this)
-        }
+        queueSave()
     }
 
     override fun getLinkedChest(): Location? {
@@ -594,9 +657,7 @@ class Minion(
         entity.teleport(location)
 
         if (save) {
-            AxMinionsPlugin.dataQueue.submit {
-                AxMinionsPlugin.dataHandler.saveMinion(this)
-            }
+            queueSave()
         }
     }
 
@@ -605,19 +666,35 @@ class Minion(
     }
 
     override fun remove() {
+        if (!removed.compareAndSet(false, true)) return
+
         Warnings.remove(this, warning ?: Warnings.NO_CONTAINER)
         Minions.remove(this)
         entity.remove()
 
-        AxMinionsPlugin.dataQueue.submit {
-            AxMinionsPlugin.dataHandler.deleteMinion(this)
+        AxMinionsPlugin.dataHandler.deleteMinion(this)
 
-            if (AxMinionsAPI.INSTANCE.getIntegrations().getIslandIntegration() != null) {
-                val islandId = AxMinionsAPI.INSTANCE.getIntegrations().getIslandIntegration()!!.getIslandAt(location)
-                if (islandId.isNotBlank()) {
-                    AxMinionsPlugin.dataHandler.islandBreak(islandId)
-                }
+        if (AxMinionsAPI.INSTANCE.getIntegrations().getIslandIntegration() != null) {
+            val islandId = AxMinionsAPI.INSTANCE.getIntegrations().getIslandIntegration()!!.getIslandAt(location)
+            if (islandId.isNotBlank()) {
+                AxMinionsPlugin.dataHandler.islandBreak(islandId)
             }
+        }
+    }
+
+    fun isRemoved(): Boolean {
+        return removed.get()
+    }
+
+    fun saveNow() {
+        if (!removed.get()) {
+            AxMinionsPlugin.dataHandler.saveMinion(this)
+        }
+    }
+
+    private fun queueSave() {
+        AxMinionsPlugin.dataQueue.submit {
+            saveNow()
         }
     }
 
@@ -887,14 +964,252 @@ class Minion(
     }
 
     override fun setCharge(charge: Long) {
+        if (removed.get()) return
         this.charge = charge
 
-        AxMinionsPlugin.dataQueue.submit {
-            AxMinionsPlugin.dataHandler.saveMinion(this)
-        }
+        queueSave()
     }
 
     override fun getInventory(): Inventory {
         return Bukkit.createInventory(this, 9)
+    }
+
+    override fun openGui(player: Player, purpose: String) {
+        currentGuiPurpose = purpose
+        val guiFileName = type.getGuiForPurpose(purpose).removeSuffix(".yml")
+        val guiName = guiFileName.substringAfterLast('/').substringAfterLast('\\')
+        var guiConfig = GuiManager.getGui(guiName)
+
+        // Load GUI config if not cached
+        if (guiConfig == null) {
+            val resourceStream = javaClass.classLoader.getResourceAsStream("gui/$guiName.yml")
+            if (resourceStream != null) {
+                guiConfig = GuiConfig("$guiName.yml", resourceStream)
+                GuiManager.registerGui(guiName, guiConfig)
+            }
+        }
+
+        if (guiConfig == null) {
+            // Fallback to default minion GUI
+            guiConfig = GuiManager.getGui("minion")
+            if (guiConfig == null) {
+                val defaultStream = javaClass.classLoader.getResourceAsStream("gui/minion.yml")
+                if (defaultStream != null) {
+                    guiConfig = GuiConfig("minion.yml", defaultStream)
+                    GuiManager.registerGui("minion", guiConfig)
+                }
+            }
+        }
+
+        if (guiConfig == null) {
+            player.sendMessage(StringUtils.formatToString(Messages.PREFIX() + "&cCould not load GUI!"))
+            return
+        }
+
+        val title = StringUtils.formatToString(
+            guiConfig.title,
+            Placeholder.parsed("level_color", Messages.LEVEL_COLOR(level)),
+            Placeholder.unparsed("level", level.toString()),
+            Placeholder.unparsed("owner", owner.name ?: "???"),
+            Placeholder.unparsed("name", type.getConfig().get("name"))
+        )
+
+        val inventory = Bukkit.createInventory(this, guiConfig.size, title)
+
+        // Check if this minion requires MMOItems for upgrade
+        val requiresMmoItemsUpgrade = AxMinionsPlugin.integrations.mmoitemsIntegration &&
+            !type.hasReachedMaxLevel(this) &&
+            type.getSection("requirements.mmoitems", this.level + 1) != null
+
+        // Pre-load MMOItems requirement data if available
+        val mmoItemsData = if (requiresMmoItemsUpgrade) {
+            val section = type.getSection("requirements.mmoitems", this.level + 1)
+            val list = mutableListOf<Triple<String, String, Int>>() // type, id, amount
+            if (section != null) {
+                for (key in section.keys) {
+                    val reqSection = section.getSection(key.toString())
+                    if (reqSection != null) {
+                        val reqType = reqSection.getString("type")
+                        val reqId = reqSection.getString("id")
+                        val reqAmt = reqSection.getInt("amount", 1)
+                        if (reqType != null && reqId != null) {
+                            list.add(Triple(reqType, reqId, reqAmt))
+                        }
+                    }
+                }
+            }
+            list
+        } else {
+            emptyList()
+        }
+
+        // Count MMOItems in player inventory
+        val mmoItemCounts = mutableMapOf<Int, Int>()
+        if (mmoItemsData.isNotEmpty()) {
+            for (invItem in player.inventory.contents) {
+                if (invItem == null || invItem.type.isAir) continue
+                val itemType = MMOItems.getType(invItem)
+                val itemId = MMOItems.getID(invItem)
+                if (itemType != null && itemId != null) {
+                    for ((idx, data) in mmoItemsData.withIndex()) {
+                        if (itemType.id == data.first && itemId == data.second) {
+                            mmoItemCounts[idx] = (mmoItemCounts[idx] ?: 0) + invItem.amount
+                        }
+                    }
+                }
+            }
+        }
+
+        for (entry in guiConfig.getItemEntries()) {
+            val template = entry.section.getString("template", "")
+
+            // Handle template items (like mmoitems) that expand to multiple slots
+            if (template == "mmoitems" && mmoItemsData.isNotEmpty()) {
+                var slotIdx = 0
+                for ((mmoIndex, mmoData) in mmoItemsData.withIndex()) {
+                    if (slotIdx >= entry.slots.size) break
+
+                    val slot = entry.slots[slotIdx]
+                    val mmoItem = MMOItems.plugin.getItem(mmoData.first, mmoData.second)
+                    val displayName = mmoItem?.itemMeta?.displayName ?: "${mmoData.first}:${mmoData.second}"
+
+                    // Deserialize Legacy Component
+                    val displayNameComponent: Component =
+                        LegacyComponentSerializer.legacySection().deserialize(displayName)
+                    // Serialize Component to MiniMessage format
+                    val miniMessageDisplayName: String = MiniMessage.miniMessage().serialize(displayNameComponent)
+
+                    val currentCount = mmoItemCounts[mmoIndex] ?: 0
+                    // Build item with per-requirement placeholders
+                    val item = buildGuiItem(entry.section,
+                        Placeholder.parsed("mmoitem_x_name", miniMessageDisplayName),
+                        Placeholder.unparsed("mmoitem_x_amount", mmoData.third.toString()),
+                        Placeholder.unparsed("mmoitem_x_current", currentCount.toString())
+                    )
+                    if (item != null) {
+                        val meta = item.itemMeta ?: continue
+                        meta.persistentDataContainer.set(Keys.GUI, PersistentDataType.STRING, entry.action)
+                        item.itemMeta = meta
+                        inventory.setItem(slot, item)
+                    }
+                    slotIdx++
+                }
+                continue
+            }
+
+            val item = buildGuiItem(entry.section)
+            if (item != null) {
+                val meta = item.itemMeta ?: continue
+                
+                // Smart upgrade check:
+                // If action is "open_gui" targeting "upgrade", but this minion doesn't need MMOItems,
+                // use a direct "upgrade" action instead (inline upgrade button)
+                var resolvedAction = entry.action
+                if (entry.action == "open_gui" && entry.guiRef == "upgrade" && !requiresMmoItemsUpgrade) {
+                    resolvedAction = "upgrade"
+                }
+                
+                if (resolvedAction == "open_gui" && entry.guiRef.isNotBlank()) {
+                    meta.persistentDataContainer.set(Keys.GUI, PersistentDataType.STRING, "open_gui_${entry.guiRef}")
+                } else {
+                    meta.persistentDataContainer.set(Keys.GUI, PersistentDataType.STRING, resolvedAction)
+                }
+                item.itemMeta = meta
+
+                // Set the item in all specified slots
+                for (slot in entry.slots) {
+                    inventory.setItem(slot, item)
+                }
+            }
+        }
+
+        player.openInventory(inventory)
+        openInventories.add(inventory)
+    }
+
+    override fun getCurrentGuiPurpose(): String? {
+        return currentGuiPurpose
+    }
+
+    /**
+     * Build an ItemStack for a GUI item section with placeholders.
+     * Accepts optional extra placeholders (used by template items).
+     */
+    private fun buildGuiItem(section: com.artillexstudios.axapi.libs.boostedyaml.block.implementation.Section,
+                             vararg extraPlaceholders: net.kyori.adventure.text.minimessage.tag.resolver.TagResolver): ItemStack? {
+        val placeholders = mutableListOf<net.kyori.adventure.text.minimessage.tag.resolver.TagResolver>()
+
+        placeholders.add(Placeholder.parsed("level", level.toString()))
+        placeholders.add(Placeholder.parsed(
+            "next_level", if (type.hasReachedMaxLevel(this)) Messages.UPGRADES_MAX_LEVEL_REACHED()
+            else (this.level + 1).toString()
+        ))
+        placeholders.add(Placeholder.parsed("range", type.getDouble("range", this.level).toString()))
+        placeholders.add(Placeholder.parsed(
+            "next_range", if (type.hasReachedMaxLevel(this)) Messages.UPGRADES_MAX_LEVEL_REACHED()
+            else type.getDouble("range", this.level + 1).toString()
+        ))
+        placeholders.add(Placeholder.parsed("speed", type.getDouble("speed", this.level).toString()))
+        placeholders.add(Placeholder.parsed(
+            "next_speed", if (type.hasReachedMaxLevel(this)) Messages.UPGRADES_MAX_LEVEL_REACHED()
+            else type.getDouble("speed", this.level + 1).toString()
+        ))
+        placeholders.add(Placeholder.parsed(
+            "price", if (type.hasReachedMaxLevel(this)) Messages.UPGRADES_MAX_LEVEL_REACHED()
+            else type.getDouble("requirements.money", this.level + 1).toString()
+        ))
+        placeholders.add(Placeholder.parsed(
+            "required_actions", if (type.hasReachedMaxLevel(this)) Messages.UPGRADES_MAX_LEVEL_REACHED()
+            else type.getDouble("requirements.actions", this.level + 1).toString()
+        ))
+        placeholders.add(Placeholder.parsed("actions", actions.toString()))
+        placeholders.add(Placeholder.parsed("storage", numberFormat.format(storage)))
+        placeholders.add(Placeholder.unparsed("direction", Messages.ROTATION_NAME(direction)))
+        placeholders.add(Placeholder.unparsed(
+            "linked", when (linkedChest) {
+                null -> "---"
+                else -> Messages.LOCATION_FORMAT()
+                    .replace("<world>", linkedChest?.world!!.name)
+                    .replace("<x>", linkedChest?.blockX.toString())
+                    .replace("<y>", linkedChest?.blockY.toString())
+                    .replace("<z>", linkedChest?.blockZ.toString())
+            }
+        ))
+        placeholders.add(Placeholder.parsed("charge", TimeUtils.format(charge - System.currentTimeMillis())))
+
+        // MMOItems upgrade requirement placeholders
+        if (AxMinionsPlugin.integrations.mmoitemsIntegration && !type.hasReachedMaxLevel(this)) {
+            val mmoItemsSection = type.getSection("requirements.mmoitems", this.level + 1)
+            if (mmoItemsSection != null) {
+                var mmoIndex = 1
+                for (key in mmoItemsSection.keys) {
+                    val reqSection = mmoItemsSection.getSection(key.toString()) ?: continue
+                    val requiredType = reqSection.getString("type") ?: continue
+                    val requiredId = reqSection.getString("id") ?: continue
+                    val requiredAmount = reqSection.getInt("amount", 1)
+
+                    val mmoItem = MMOItems.plugin.getItem(requiredType, requiredId)
+                    val displayName = mmoItem?.itemMeta?.displayName ?: "$requiredType:$requiredId"
+
+                    // Deserialize Legacy Component
+                    val displayNameComponent: Component =
+                        LegacyComponentSerializer.legacySection().deserialize(displayName)
+                    // Serialize Component to MiniMessage format
+                    val miniMessageDisplayName: String = MiniMessage.miniMessage().serialize(displayNameComponent)
+
+                    placeholders.add(Placeholder.parsed("mmoitem_${mmoIndex}_name", miniMessageDisplayName))
+                    placeholders.add(Placeholder.unparsed("mmoitem_${mmoIndex}_amount", requiredAmount.toString()))
+                    placeholders.add(Placeholder.unparsed("mmoitem_${mmoIndex}_current", "0"))
+                    mmoIndex++
+                }
+            }
+        }
+
+        // Add extra placeholders from template expansion (e.g. mmoitem_x_*)
+        for (extra in extraPlaceholders) {
+            placeholders.add(extra)
+        }
+
+        return ItemBuilder.create(section, *placeholders.toTypedArray()).get()
     }
 }

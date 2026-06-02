@@ -1,0 +1,78 @@
+# ========================================
+# MMOItems Upgrade GUI
+# Shows required items for upgrade
+# Automatically paginates if there are many requirements
+# ========================================
+title: "<level_color>[<level>] Upgrade Materials"
+size: 45
+purpose: upgrade
+
+items:
+  # MMOItems required materials - auto-generated for each requirement
+  # Use template: mmoitems to expand across multiple slots automatically
+  # Slot 22 is reserved for the upgrade button
+  material_template:
+    slot: [10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 23, 24, 25]
+    type: player_head
+    texture: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvYzk2MjdiZTYyY2VkNzE0MTEzOWQzZjE1NTc5MGE1ZDQzNTZlYjdiOWVlOTVlNTA0YjMzMjI5NzRjYmM1MTVlYSJ9fX0="
+    name: "<#00CCFF><mmoitem_x_name>"
+    lore:
+      - ""
+      - " <gray>- <white>Amount needed: <#FFEEAA>x<mmoitem_x_amount>"
+      - " <gray>- <white>You have: <color:#AAFFAA><mmoitem_x_current><gray>/<mmoitem_x_amount>"
+      - ""
+    template: mmoitems
+    action: "none"
+
+  # Upgrade button (center)
+  upgrade:
+    slot: 22
+    type: gold_ingot
+    name: "<#00CCFF><b>Upgrade to Level <next_level>"
+    lore:
+      - ""
+      - " <gray>- <white>New Range: <green><next_range>"
+      - " <gray>- <white>New Speed: <green><next_speed>ms"
+      - ""
+      - "<#00CCFF>Requirements:"
+      - " <gray>- <white>Money: <#33FF33><price>$"
+      - " <gray>- <white>Blocks broken: <#33FF33><required_actions>"
+      - ""
+      - "<#00CCFF><b>(!)</b> Click here to upgrade your minion!"
+    action: "upgrade"
+
+  # Previous page button
+  prev_page:
+    slot: 9
+    type: arrow
+    name: "<#FFCC00><b>« Previous Page"
+    lore:
+      - ""
+      - " <gray>Click to view previous materials."
+      - ""
+    action: "none"
+
+  # Next page button
+  next_page:
+    slot: 17
+    type: arrow
+    name: "<#FFCC00><b>Next Page »"
+    lore:
+      - ""
+      - " <gray>Click to view more materials."
+      - ""
+    action: "none"
+
+  # Back button
+  back:
+    slot: 40
+    type: barrier
+    name: "<red><b>Back"
+    lore:
+      - ""
+      - " <gray>Return to the main minion menu."
+      - ""
+      - "<red><b>(!)</b> Click to go back!"
+    action: "back"
+
+config-version: 1
