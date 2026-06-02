@@ -2,6 +2,7 @@ name: "AxMinions"
 main: "com.artillexstudios.axminions.AxMinionsPlugin"
 version: "$version"
 api-version: 1.18
+load: POSTWORLD
 folia-supported: true
 softdepend:
   - RoseStacker
